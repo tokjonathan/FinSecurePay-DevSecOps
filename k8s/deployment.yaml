@@ -1,0 +1,73 @@
+# Deployment: tells Kubernetes "keep 2 copies of this container running at all times".
+# If a pod dies, the Deployment notices and creates a replacement (Task 3 recovery demo).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finsecure
+  labels:
+    app: finsecure
+spec:
+  replicas: 2                      # requirement: at least two replicas
+  revisionHistoryLimit: 5          # keep old versions so `kubectl rollout undo` works (Task 4)
+  selector:
+    matchLabels:
+      app: finsecure               # this Deployment manages pods with this label
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0            # never drop below 2 working pods during an update
+      maxSurge: 1                  # start 1 new pod, wait until Ready, then remove an old one
+  template:                        # the blueprint for each pod
+    metadata:
+      labels:
+        app: finsecure
+    spec:
+      securityContext:
+        runAsNonRoot: true         # Kubernetes refuses to start the pod if it would run as root
+        runAsUser: 10001
+      containers:
+        - name: finsecure
+          image: grampap/finsecure:1.0.0   # a fixed version, never :latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+
+          # Load every key in the ConfigMap as an environment variable
+          envFrom:
+            - configMapRef:
+                name: finsecure-config
+
+          # Resource limits: stops one pod hogging the node; needed for sensible scheduling
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # Check for Readiness: "can this pod take traffic yet?"
+          # Service sends no requests to this pod until it passes the readiness check.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20      # Spring Boot needs a few seconds to start
+            periodSeconds: 5
+            failureThreshold: 3
+
+          # Check for Liveness: "is this pod still working?"
+          # If it fails 3 times in a row, Kubernetes restarts the container.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40      # longer than readiness, so slow starts aren't killed
+            periodSeconds: 10
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

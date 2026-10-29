@@ -1,0 +1,17 @@
+# Service: one stable address in front of the pods.
+# Pods come and go (new IPs each time); the Service always finds the current Ready ones by label.
+# type LoadBalancer asks the cloud provider for a public IP -> external access (Task 3).
+apiVersion: v1
+kind: Service
+metadata:
+  name: finsecure
+  labels:
+    app: finsecure
+spec:
+  type: LoadBalancer
+  selector:
+    app: finsecure          # send traffic to pods carrying this label
+  ports:
+    - name: http
+      port: 80              # public port: http://<EXTERNAL-IP>/health
+      targetPort: http      # container port 8080

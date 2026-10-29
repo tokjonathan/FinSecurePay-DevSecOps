@@ -1,0 +1,12 @@
+# ConfigMap: business settings kept OUTSIDE the image.
+# Change a value here + `kubectl apply` + restart pods -> new behaviour, no rebuild.
+# The app reads these as environment variables (see application.properties).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finsecure-config
+  labels:
+    app: finsecure
+data:
+  MAX_AMOUNT: "10000"
+  ALLOWED_CURRENCIES: "SGD,USD,EUR,MYR"
