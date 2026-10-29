@@ -1,0 +1,17 @@
+# ServiceMonitor: tells Prometheus "scrape the pods behind the finsecure Service".
+# It finds the Service by label (app: finsecure) - the same label-matching idea as the Service -> Pods link.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: finsecure
+  namespace: default
+  labels:
+    app: finsecure
+spec:
+  selector:
+    matchLabels:
+      app: finsecure
+  endpoints:
+    - port: http                     # the named port in k8s/service.yaml
+      path: /actuator/prometheus     # Spring Boot Actuator + Micrometer metrics endpoint
+      interval: 15s

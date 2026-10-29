@@ -1,0 +1,39 @@
+# Alert rules, evaluated by Prometheus. Firing alerts go to Alertmanager, which emails them.
+# Every rule carries the label app: finsecure - Alertmanager routes only those to email.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: finsecure-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: finsecure.rules
+      rules:
+
+        # APPLICATION alert: business-level signal.
+        # A sudden burst of rejected transactions can mean an attack (probing / fraud attempts)
+        # or a broken client integration. Threshold: more than 0.5 rejections per second
+        # (30 per minute), sustained for 1 minute.
+        - alert: FinSecureHighRejectionRate
+          expr: |
+            sum(rate(http_server_requests_seconds_count{application="finsecure-validator", uri="/validate", status="422"}[1m])) > 0.5
+          for: 1m
+          labels:
+            severity: warning
+            app: finsecure
+          annotations:
+            summary: "High rate of rejected transactions on /validate"
+            description: "{{ $value | printf \"%.2f\" }} rejected transactions/sec for over 1 minute (threshold 0.5/s). Possible attack or misbehaving client."
+            runbook: "Check rejection reasons: kubectl logs -l app=finsecure --tail=200 | grep REJECTED"
+
+        # INFRASTRUCTURE alert: fewer than 2 healthy replicas means no redundancy left.
+        - alert: FinSecureReplicasUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{namespace="default", deployment="finsecure"} < 2
+          for: 2m
+          labels:
+            severity: critical
+            app: finsecure
+          annotations:
+            summary: "FinSecure has fewer than 2 available replicas"
+            description: "Only {{ $value }} replica(s) available for over 2 minutes. Check: kubectl get pods -l app=finsecure; kubectl describe pod <name>"

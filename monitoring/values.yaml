@@ -1,0 +1,74 @@
+# Helm values for kube-prometheus-stack (Prometheus + Grafana + Alertmanager + kube-state-metrics + node-exporter)
+#
+# Install:
+#   helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring \
+#     -f monitoring/values.yaml --set grafana.adminPassword='<choose-a-password>'
+#
+# BEFORE INSTALLING: replace the two YOUR_GMAIL / YOUR_ALERT_EMAIL placeholders below.
+
+# AKS manages the control plane for us, so these components can't be scraped.
+# Disabling them avoids permanent false "XxxDown" alerts.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # Pick up ServiceMonitors and PrometheusRules from ANY namespace, not only ones
+    # labelled with this Helm release (so our finsecure ServiceMonitor/rules are found)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    retention: 2d
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+grafana:
+  # Dashboards in ConfigMaps labelled grafana_dashboard="1" are loaded automatically
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+
+alertmanager:
+  alertmanagerSpec:
+    # Mounts the Kubernetes Secret "alertmanager-smtp" at
+    # /etc/alertmanager/secrets/alertmanager-smtp/ so the Gmail app password
+    # is read from a file and never appears in this (committed) values file.
+    secrets:
+      - alertmanager-smtp
+
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      # Everything goes nowhere by default (the stack ships many generic alerts,
+      # including an always-firing "Watchdog"); only FinSecure alerts are emailed.
+      receiver: "null"
+      group_by: ["alertname"]
+      group_wait: 30s
+      group_interval: 2m
+      repeat_interval: 1h
+      routes:
+        - receiver: email
+          matchers:
+            - app="finsecure"
+    receivers:
+      - name: "null"
+      - name: email
+        email_configs:
+          - to: tokjonathan@gmail.com
+            from: tokjonathan@gmail.com
+            smarthost: smtp.gmail.com:587
+            auth_username: tokjonathan@gmail.com
+            auth_identity: tokjonathan@gmail.com
+            auth_password_file: /etc/alertmanager/secrets/alertmanager-smtp/password
+            require_tls: true
+            send_resolved: true    # also email when the alert clears
