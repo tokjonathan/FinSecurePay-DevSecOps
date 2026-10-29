@@ -1,17 +1,16 @@
-# Deployment: tells Kubernetes "keep 2 copies of this container running at all times".
-# If a pod dies, the Deployment notices and creates a replacement (Task 3 recovery demo).
-apiVersion: apps/v1
+# Kubernetes Deployment to keep 2 copies of this container running at all times
+# If a pod dies, k8 engine references Deployment to creates a replacement.
 kind: Deployment
 metadata:
   name: finsecure
   labels:
     app: finsecure
 spec:
-  replicas: 2                      # requirement: at least two replicas
-  revisionHistoryLimit: 5          # keep old versions so `kubectl rollout undo` works (Task 4)
+  replicas: 2                      # keep 2 replicas 
+  revisionHistoryLimit: 5          # keep old versions for `kubectl rollout undo` to work 
   selector:
     matchLabels:
-      app: finsecure               # this Deployment manages pods with this label
+      app: finsecure               # Deployment manages pod with the finsecure label
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -23,11 +22,11 @@ spec:
         app: finsecure
     spec:
       securityContext:
-        runAsNonRoot: true         # Kubernetes refuses to start the pod if it would run as root
+        runAsNonRoot: true         # do not start the pod if it would run as root
         runAsUser: 10001
       containers:
         - name: finsecure
-          image: grampap/finsecure:1.0.0   # a fixed version, never :latest
+          image: grampap/finsecure:1.0.0   # using a fixed version, never :latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -38,7 +37,7 @@ spec:
             - configMapRef:
                 name: finsecure-config
 
-          # Resource limits: stops one pod hogging the node; needed for sensible scheduling
+          # Resource limits - stops one pod hogging the node; needed for sensible scheduling
           resources:
             requests:
               cpu: 100m
@@ -53,7 +52,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: http
-            initialDelaySeconds: 20      # Spring Boot needs a few seconds to start
+            initialDelaySeconds: 20      # few seconds delay for Spring Boot to start
             periodSeconds: 5
             failureThreshold: 3
 
@@ -63,7 +62,7 @@ spec:
             httpGet:
               path: /actuator/health/liveness
               port: http
-            initialDelaySeconds: 40      # longer than readiness, so slow starts aren't killed
+            initialDelaySeconds: 40      # set longer than readiness checks to prevent slow starts from being killed
             periodSeconds: 10
             failureThreshold: 3
 
