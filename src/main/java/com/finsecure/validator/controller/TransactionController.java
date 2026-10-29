@@ -69,8 +69,8 @@ public class TransactionController {
     }
 
     /**
-     * Security: never write full account numbers to logs, since logs are shipped to
-     * central logging where many people can read them. ACC12345678 -> ****5678
+     * Security: not writing full account numbers to logs, since logs are shipped to
+     * central logging where others can read them. ACC12345678 -> ****5678
      */
     static String mask(String account) {
         if (account == null || account.length() <= 4) {

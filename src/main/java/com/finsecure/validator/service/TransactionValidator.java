@@ -29,7 +29,6 @@ public class TransactionValidator {
 
     /** Account IDs look like ACC followed by 5-10 digits, e.g. ACC12345. */
     private static final Pattern ACCOUNT_PATTERN = Pattern.compile("^ACC\\d{5,10}$");
-
     private final BigDecimal maxAmount;
     private final Set<String> allowedCurrencies;
 
