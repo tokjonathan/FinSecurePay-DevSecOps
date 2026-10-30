@@ -1,12 +1,9 @@
-// FinSecure Pay - CI/CD pipeline
-// Checkout -> Build -> Test -> Package -> Security Checks -> Container Build -> Image Scan -> Push -> Deploy
+// FinSecure Pay CI/CD Pipeline on Jenkins
+// Checkout \Build \ Test \ Package \ Security Checks \ Container Build \ Image Scan \ Push \ Deploy
 //
 // Jenkins credentials this file expects (Manage Jenkins -> Credentials):
 //   dockerhub-creds  : Username with password  (Docker Hub username + access token)
 //   aks-kubeconfig   : Secret file             (kubeconfig for the AKS cluster)
-
-SONAR_ORG     = 'tokjonathan'
-SONAR_PROJECT = 'tokjonathan_FinSecurePay-DevSecOps'
 
 pipeline {
     agent any
@@ -16,8 +13,8 @@ pipeline {
                 description: 'Leave EMPTY for a normal build. To roll back, enter an earlier image tag (e.g. 1.0.0-3): the build is skipped and that version is redeployed.')
     }
 
-    // Check GitHub for new commits every ~2 minutes and build automatically when there are any.
-    // (Polling instead of a webhook because Jenkins runs on a laptop with no public URL.)
+    // Checks GitHub for new commits every ~2 minutes and,if exists, build automatically.
+    // (Using Polling instead of a webhook as I will be running Jenkins on my laptop not on a cloud server.)
     triggers {
         pollSCM('H/2 * * * *')
     }
@@ -31,6 +28,8 @@ pipeline {
 
     environment {
         IMAGE_REPO = 'grampap/finsecure'
+        SONAR_ORG     = 'tokjonathan'
+        SONAR_PROJECT = 'tokjonathan_FinSecurePay-DevSecOps'
         DEPLOYMENT = 'finsecure'   // Deployment name in k8s/deployment.yaml
         CONTAINER  = 'finsecure'   // container name inside that Deployment
     }
@@ -87,7 +86,22 @@ pipeline {
         stage('Security Checks') {
             when { expression { !params.ROLLBACK_TO_TAG?.trim() } }
             steps {
-                // Dependency scan of pom.xml. Task 5 adds SonarCloud + OWASP Dependency-Check here.
+                //    Static code analysis + quality gate (SonarCloud).
+                //    sonar.qualitygate.wait=true makes this step FAIL if the SonarCloud
+                //    quality gate fails (bugs, vulnerabilities).
+                withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
+                    sh '''
+                        mvn -B -ntp org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                            -Dsonar.host.url=https://sonarcloud.io \
+                            -Dsonar.organization=$SONAR_ORG \
+                            -Dsonar.projectKey=$SONAR_PROJECT \
+                            -Dsonar.token=$SONAR_TOKEN \
+                            -Dsonar.qualitygate.wait=true \
+                            -Dsonar.qualitygate.timeout=300
+                    '''
+                }
+
+                // 2) Dependency vulnerability scan of pom.xml (Trivy)
                 sh '''
                     # Full report (HIGH + CRITICAL), never fails the build
                     trivy fs --scanners vuln --skip-dirs target --severity HIGH,CRITICAL \
@@ -109,7 +123,7 @@ pipeline {
         stage('Container Build') {
             when { expression { !params.ROLLBACK_TO_TAG?.trim() } }
             steps {
-                // linux/amd64 because the AKS nodes are Intel/AMD, while this Mac is ARM
+                // linux/amd64 because the AKS nodes are Intel/AMD, while my Mac is on ARM
                 sh '''
                     docker build --platform linux/amd64 \
                         --build-arg APP_VERSION=$IMAGE_TAG \
@@ -121,7 +135,7 @@ pipeline {
         stage('Image Scan') {
             when { expression { !params.ROLLBACK_TO_TAG?.trim() } }
             steps {
-                // Scan BEFORE pushing, so a vulnerable image never reaches the registry
+                // Scan before pushing, prevent vulnerable image from reaching the registry
                 sh '''
                     trivy image --platform linux/amd64 --severity HIGH,CRITICAL \
                         --exit-code 0 --output trivy-image-report.txt $IMAGE_REPO:$IMAGE_TAG
@@ -144,8 +158,8 @@ pipeline {
             steps {
                 // Token comes from the Jenkins credential store; Jenkins masks it in the log
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
-                                                  usernameVariable: 'DH_USER',
-                                                  passwordVariable: 'DH_TOKEN')]) {
+                                                usernameVariable: 'DH_USER',
+                                                passwordVariable: 'DH_TOKEN')]) {
                     sh '''
                         echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
                         docker push $IMAGE_REPO:$IMAGE_TAG
@@ -196,16 +210,17 @@ pipeline {
         }
         failure {
             echo "FAILED: nothing new was deployed (or the rollout was rolled back)"
-            // Email via the Email Extension plugin. '$DEFAULT_RECIPIENTS' (single quotes) is a
-            // plugin token: the address lives in Jenkins' system config, not in this repo.
+            // Email via the Email Extension plugin.
+            // '$DEFAULT_RECIPIENTS' is a plugin token
+            // the address lives in Jenkins' system config, not in this repo for security.
             emailext(
                 to: '$DEFAULT_RECIPIENTS',
                 subject: "FAILED: ${env.JOB_NAME} ${currentBuild.displayName}",
                 body: """<p><b>Pipeline FAILED</b> - nothing new was deployed.</p>
-                         <p>Job: ${env.JOB_NAME}<br>Build: ${currentBuild.displayName}<br>
-                         Image tag: ${env.IMAGE_TAG ?: 'n/a'}</p>
-                         <p>Console: <a href="${env.BUILD_URL}console">${env.BUILD_URL}console</a></p>
-                         <p>The build log is attached.</p>""",
+                        <p>Job: ${env.JOB_NAME}<br>Build: ${currentBuild.displayName}<br>
+                        Image tag: ${env.IMAGE_TAG ?: 'n/a'}</p>
+                        <p>Console: <a href="${env.BUILD_URL}console">${env.BUILD_URL}console</a></p>
+                        <p>The build log is attached.</p>""",
                 mimeType: 'text/html',
                 attachLog: true,
                 compressLog: true
@@ -217,7 +232,7 @@ pipeline {
                 to: '$DEFAULT_RECIPIENTS',
                 subject: "FIXED: ${env.JOB_NAME} ${currentBuild.displayName}",
                 body: """<p><b>Pipeline back to green.</b> ${env.IMAGE_REPO}:${env.IMAGE_TAG} is live on AKS.</p>
-                         <p><a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>""",
+                        <p><a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>""",
                 mimeType: 'text/html'
             )
         }
