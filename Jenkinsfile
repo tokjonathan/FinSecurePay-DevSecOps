@@ -193,7 +193,8 @@ pipeline {
                         # Smoke test through the public load balancer
                         IP=$(kubectl get svc finsecure -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
                         echo "Smoke test: http://$IP/health"
-                        curl -fsS --retry 5 --retry-delay 5 "http://$IP/health"
+                        sleep 10
+                        curl -fsS --connect-timeout 5 --retry 10 --retry-delay 6 --retry-all-errors "http://$IP/health"
                         echo
                     '''
                 }
