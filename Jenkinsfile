@@ -5,12 +5,15 @@
 //   dockerhub-creds  : Username with password  (Docker Hub username + access token)
 //   aks-kubeconfig   : Secret file             (kubeconfig for the AKS cluster)
 
+SONAR_ORG     = 'tokjonathan'
+SONAR_PROJECT = 'tokjonathan_FinSecurePay-DevSecOps'
+
 pipeline {
     agent any
 
     parameters {
         string(name: 'ROLLBACK_TO_TAG', defaultValue: '',
-               description: 'Leave EMPTY for a normal build. To roll back, enter an earlier image tag (e.g. 1.0.0-3): the build is skipped and that version is redeployed.')
+                description: 'Leave EMPTY for a normal build. To roll back, enter an earlier image tag (e.g. 1.0.0-3): the build is skipped and that version is redeployed.')
     }
 
     // Check GitHub for new commits every ~2 minutes and build automatically when there are any.
@@ -193,7 +196,30 @@ pipeline {
         }
         failure {
             echo "FAILED: nothing new was deployed (or the rollout was rolled back)"
-            // Task 6 adds an email notification here
+            // Email via the Email Extension plugin. '$DEFAULT_RECIPIENTS' (single quotes) is a
+            // plugin token: the address lives in Jenkins' system config, not in this repo.
+            emailext(
+                to: '$DEFAULT_RECIPIENTS',
+                subject: "FAILED: ${env.JOB_NAME} ${currentBuild.displayName}",
+                body: """<p><b>Pipeline FAILED</b> - nothing new was deployed.</p>
+                         <p>Job: ${env.JOB_NAME}<br>Build: ${currentBuild.displayName}<br>
+                         Image tag: ${env.IMAGE_TAG ?: 'n/a'}</p>
+                         <p>Console: <a href="${env.BUILD_URL}console">${env.BUILD_URL}console</a></p>
+                         <p>The build log is attached.</p>""",
+                mimeType: 'text/html',
+                attachLog: true,
+                compressLog: true
+            )
+        }
+        fixed {
+            // Sent when a build succeeds after a previous failure
+            emailext(
+                to: '$DEFAULT_RECIPIENTS',
+                subject: "FIXED: ${env.JOB_NAME} ${currentBuild.displayName}",
+                body: """<p><b>Pipeline back to green.</b> ${env.IMAGE_REPO}:${env.IMAGE_TAG} is live on AKS.</p>
+                         <p><a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>""",
+                mimeType: 'text/html'
+            )
         }
     }
 }
